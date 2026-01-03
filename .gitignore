@@ -13,3 +13,7 @@ wheels/
 
 # Output directory (databases, HTML exports, media, CSVs)
 output/
+
+# Development files
+main.py
+reference/
