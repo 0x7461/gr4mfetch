@@ -1,6 +1,19 @@
-# TelegramBackup - Advanced Backup Solution for Telegram Chats
+# Gr4mFetch - Advanced Backup Solution for Telegram Chats
 
-TelegramBackup is a comprehensive tool designed for extracting, organizing, and archiving messages from your Telegram chats, channels, and groups. It preserves not only message content but also media files, reactions, replies, forwarded content, and other rich features that make Telegram unique. Whether you need to back up personal conversations, archive large channels, or export group discussions, TelegramBackup offers a complete solution.
+> **Customized fork of [TelegramBackup](https://github.com/N4rr34n6/TelegramBackup) by N4rr34n6**
+> Enhanced with environment-based configuration, organized output structure, and modern Python tooling.
+
+Gr4mFetch is a comprehensive tool designed for extracting, organizing, and archiving messages from your Telegram chats, channels, and groups. It preserves not only message content but also media files, reactions, replies, forwarded content, and other rich features that make Telegram unique. Whether you need to back up personal conversations, archive large channels, or export group discussions, Gr4mFetch offers a complete solution.
+
+## 🎯 Fork Enhancements
+
+This fork adds the following improvements over the original:
+
+- **🔐 Environment-based Configuration**: Credentials stored securely in `.env` file (never committed to git)
+- **📁 Organized Output Structure**: Backups organized by entity type (Users/Channels/Groups/Supergroups)
+- **📦 Modern Package Management**: Uses `uv` for fast, reliable dependency management
+- **🗂️ Isolated Entity Backups**: Each entity gets its own directory with database, HTML, and media
+- **🛡️ Enhanced Security**: Comprehensive `.gitignore` to protect sensitive data
 
 ## 🌟 Key Features
 
@@ -20,7 +33,8 @@ TelegramBackup is a comprehensive tool designed for extracting, organizing, and 
 ## 📋 Installation
 
 ### Prerequisites
-- Python 3.6 or higher
+- Python 3.12 or higher
+- [uv](https://docs.astral.sh/uv/) package manager
 - Internet connection
 - Telegram account
 
@@ -28,27 +42,24 @@ TelegramBackup is a comprehensive tool designed for extracting, organizing, and 
 
 1. **Clone the repository**:
     ```bash
-    git clone https://github.com/N4rr34n6/TelegramBackup.git
+    git clone https://github.com/0x7461/gr4mfetch.git
+    cd gr4mfetch
     ```
 
-2. **Navigate to the project directory**:
+2. **Install dependencies with uv**:
     ```bash
-    cd TelegramBackup
+    uv sync
     ```
 
-3. **Install the required dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-    
-    If the requirements.txt file is missing, install these packages:
-    ```bash
-    pip install telethon jinja2 beautifulsoup4
-    ```
+    This automatically creates a virtual environment and installs:
+    - `telethon` - Telegram API client
+    - `jinja2` - HTML template engine
+    - `beautifulsoup4` - HTML parsing
+    - `python-dotenv` - Environment variable management
 
 ## 🔑 Getting Telegram API Credentials
 
-Before using TelegramBackup, you need to obtain your own Telegram API credentials:
+Before using Gr4mFetch, you need to obtain your own Telegram API credentials:
 
 1. **Visit the Telegram API Development Tools**:
    - Go to https://my.telegram.org
@@ -56,34 +67,45 @@ Before using TelegramBackup, you need to obtain your own Telegram API credential
 
 2. **Create a New Application**:
    - Click on "API Development tools"
-   - Fill out the form with your application details (you can use "TelegramBackup" for app title and short name)
+   - Fill out the form with your application details
+   - Suggested values:
+     - App title: `Gr4mFetch` (or your preference)
+     - Short name: `gr4mfetch`
+     - Platform: `Desktop`
    - Click "Create application"
 
 3. **Get Your API Credentials**:
    - After creating the application, you'll see your **api_id** (a number) and **api_hash** (a string)
    - Keep these values secure - they're associated with your Telegram account
 
-4. **Configure TelegramBackup**:
-   - Open the `telegram_backup.py` file in a text editor
-   - Locate these lines near the beginning of the file:
-     ```python
-     api_id = ********
-     api_hash = ********************************
+4. **Configure Gr4mFetch**:
+   - Copy the example environment file:
+     ```bash
+     cp .env.example .env
      ```
-   - Replace them with your actual credentials:
-     ```python
-     api_id = 12345678  # Replace with your own api_id (numbers only, no quotes)
-     api_hash = "abcdef1234567890abcdef1234567890"  # Replace with your own api_hash (in quotes)
-     ```
-   - Save the file
+   - Edit `.env` with your credentials:
+     ```env
+     # Your API ID (a number, no quotes)
+     API_ID=12345678
 
-> **IMPORTANT**: The `api_id` must be an integer without quotes, and the `api_hash` must be a string with quotes.
+     # Your API Hash (a string, keep as-is)
+     API_HASH=abcdef1234567890abcdef1234567890
+
+     # Optional: Session name
+     SESSION_NAME=telegram_session
+     ```
+
+> **IMPORTANT**:
+> - The `.env` file is git-ignored and will never be committed
+> - Never share your API credentials or commit them to version control
+> - `API_ID` should be a number without quotes
+> - `API_HASH` should be the hash string without quotes
 
 ## 🚀 Usage
 
 1. **Run the script**:
     ```bash
-    python telegram_backup.py
+    uv run python telegram_backup.py
     ```
 
 2. **First-Time Login**:
@@ -117,10 +139,19 @@ Before using TelegramBackup, you need to obtain your own Telegram API credential
    - The HTML file will be regenerated with all messages (old and new)
 
 7. **Accessing Your Backup**:
-   - Messages are stored in an SQLite database (`.db` file)
-   - An HTML file is generated for easy browsing of messages
-   - Media files are saved in the `media/[entity_id]/` directory
-   - The HTML interface shows messages grouped by date with sender information, reactions, replies, and media playback
+   - All backups are organized in the `output/` directory by entity type:
+     ```
+     output/
+     ├── Users/[entity_name]/
+     ├── Channels/[entity_name]/
+     ├── Supergroups/[entity_name]/
+     └── Groups/[entity_name]/
+     ```
+   - Each entity folder contains:
+     - SQLite database (`.db` file) with all message data
+     - HTML file for browsing messages in your browser
+     - `media/` subdirectory with downloaded files
+   - Open the HTML file in your browser to view archived messages with date grouping, reactions, replies, and media playback
 
 ## 📱 HTML Export Features
 
@@ -192,8 +223,45 @@ If you're backing up chats with hundreds of thousands of messages:
 
 - **Customizing HTML Output**: You can modify the `template.html` file to change how the exported HTML looks
 - **Working with the Database**: The SQLite database can be opened with tools like DB Browser for SQLite if you want to perform custom queries
-- **Automating Backups**: Consider setting up a scheduled task to run the script periodically
-- **Media File Management**: Large media files are stored separately from the database in the `media/` directory, which you can back up independently
+- **Automating Backups**: Consider setting up a scheduled task to run the script periodically with `uv run python telegram_backup.py`
+- **Media File Management**: Large media files are stored in each entity's `media/` subdirectory, organized by entity type for easy navigation
+- **Organized Backups**: The hierarchical structure (`output/EntityType/entity_name/`) makes it easy to find and manage specific backups
+
+## 📂 Project Structure
+
+```
+gr4mfetch/
+├── .env                    # Your credentials (git-ignored, create from .env.example)
+├── .env.example            # Template for credentials
+├── telegram_backup.py      # Main backup script
+├── template.html           # HTML export template
+├── pyproject.toml          # Project dependencies (managed by uv)
+├── uv.lock                 # Dependency lock file
+├── *.session               # Telegram session files (git-ignored)
+└── output/                 # All backup data (git-ignored)
+    ├── contacts_*.csv      # Your contact list
+    ├── entities_*.csv      # Available chats/channels
+    ├── Users/              # Private chats
+    │   └── [entity_name]/
+    │       ├── [entity_name].db
+    │       ├── [entity_name].html
+    │       └── media/
+    ├── Channels/           # Broadcast channels
+    │   └── [entity_name]/
+    │       ├── [entity_name].db
+    │       ├── [entity_name].html
+    │       └── media/
+    ├── Supergroups/        # Large groups
+    │   └── [entity_name]/
+    │       ├── [entity_name].db
+    │       ├── [entity_name].html
+    │       └── media/
+    └── Groups/             # Regular groups
+        └── [entity_name]/
+            ├── [entity_name].db
+            ├── [entity_name].html
+            └── media/
+```
 
 ## 📝 Technical Details
 
@@ -209,8 +277,12 @@ If you're backing up chats with hundreds of thousands of messages:
 
 ## 📄 License
 
-This script is provided under the GNU Affero General Public License v3.0. You can find the full license text in the [LICENSE](LICENSE) file.
+This project is provided under the GNU Affero General Public License v3.0, inherited from the original TelegramBackup project. You can find the full license text in the [LICENSE](LICENSE) file.
+
+## 🙏 Acknowledgments
+
+This project is a fork of [TelegramBackup](https://github.com/N4rr34n6/TelegramBackup) by **N4rr34n6**. All core functionality and the original design are credited to the original author. This fork adds customizations for personal workflow preferences while maintaining the excellent foundation provided by the original project.
 
 ---
 
-*TelegramBackup provides a comprehensive, customizable, and reliable solution for preserving your Telegram communications. Whether for personal archiving or professional data analysis, this tool offers unmatched flexibility and functionality.*
+*Gr4mFetch provides a comprehensive, customizable, and reliable solution for preserving your Telegram communications. Whether for personal archiving or professional data analysis, this tool offers unmatched flexibility and functionality.*
