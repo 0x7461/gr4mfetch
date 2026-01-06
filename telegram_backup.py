@@ -8,6 +8,7 @@ import warnings
 import csv
 import hashlib
 import datetime
+from dotenv import load_dotenv
 from telethon import TelegramClient, events, errors
 from telethon.tl.types import User, Channel, Chat, ChannelForbidden, MessageMediaWebPage
 from jinja2 import Environment, FileSystemLoader
@@ -16,8 +17,23 @@ from telethon.tl.functions.contacts import GetContactsRequest
 
 warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 
-api_id = 12345678
-api_hash = "abcdef1234567890abcdef1234567890"
+# Load credentials from .env file
+load_dotenv()
+
+api_id = int(os.getenv("API_ID", "0"))
+api_hash = os.getenv("API_HASH", "")
+
+# Output directory for all backup files
+OUTPUT_DIR = "output"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(os.path.join(OUTPUT_DIR, "media"), exist_ok=True)
+
+# Validate credentials
+if api_id == 0 or not api_hash:
+    print("ERROR: Missing Telegram API credentials!")
+    print("Please set API_ID and API_HASH in your .env file")
+    print("Get credentials from https://my.telegram.org")
+    exit(1)
 
 def get_url_from_forwarded(forwarded):
     if forwarded is None:
@@ -30,6 +46,19 @@ def get_url_from_forwarded(forwarded):
 
 def sanitize_filename(filename):
     return re.sub(r'[^\w\-_\. ]', '_', filename)
+
+def get_entity_type(entity):
+    """Determine the type of entity (User, Channel, Group, etc.)"""
+    if isinstance(entity, User):
+        return "Users"
+    elif isinstance(entity, Channel):
+        return "Channels" if entity.broadcast else "Supergroups"
+    elif isinstance(entity, Chat):
+        return "Groups"
+    elif isinstance(entity, ChannelForbidden):
+        return "Unknown"
+    else:
+        return "Unknown"
 
 def get_file_hash(file_path):
     if not os.path.exists(file_path):
@@ -65,7 +94,7 @@ def extract_user_id(from_id_str):
 async def get_contacts(client, phone_number):
     print("Extracting contacts list...")
     
-    contacts_filename = f"contacts_{phone_number}.csv"
+    contacts_filename = os.path.join(OUTPUT_DIR, f"contacts_{phone_number}.csv")
     
     try:
         result = await client(GetContactsRequest(hash=0))
@@ -208,7 +237,7 @@ async def main():
         
         entities[entity_type].append((entity.id, name, entity))
 
-    entities_filename = f"entities_{phone_number}.csv"
+    entities_filename = os.path.join(OUTPUT_DIR, f"entities_{phone_number}.csv")
     
     with open(entities_filename, "w", encoding="utf-8-sig", newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
@@ -358,8 +387,13 @@ async def process_entity(client, entity_id, entity_name, entity, limit=None, dow
         print(f"The entity {entity_name} (ID: {entity_id}) is not accessible. It may have been deleted or you lack permission to access it.")
         return
 
+    # Determine entity type and create directory structure
+    entity_type = get_entity_type(entity)
     sanitized_name = sanitize_filename(f"{entity_id}_{entity_name}")
-    db_name = f"{sanitized_name}.db"
+    entity_dir = os.path.join(OUTPUT_DIR, entity_type, sanitized_name)
+    os.makedirs(entity_dir, exist_ok=True)
+
+    db_name = os.path.join(entity_dir, f"{sanitized_name}.db")
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
     
@@ -518,8 +552,9 @@ async def process_entity(client, entity_id, entity_name, entity, limit=None, dow
                 if download_media:
                     if not await media_exists(cursor, entity_id, id, media_type):
                         try:
-                            os.makedirs(f"media/{entity_id}", exist_ok=True)
-                            media_file = await message.download_media(file=f"media/{entity_id}")
+                            media_dir = os.path.join(entity_dir, "media")
+                            os.makedirs(media_dir, exist_ok=True)
+                            media_file = await message.download_media(file=media_dir)
                             if media_file:
                                 media_hash = get_file_hash(media_file)
                         except Exception as e:
@@ -628,9 +663,14 @@ async def process_entity(client, entity_id, entity_name, entity, limit=None, dow
 
 async def update_entity(client, entity_id, entity_name, entity, download_media=False):
     print(f"\nUpdating: {entity_name} (ID: {entity_id})")
-    
+
+    # Determine entity type and create directory structure
+    entity_type = get_entity_type(entity)
     sanitized_name = sanitize_filename(f"{entity_id}_{entity_name}")
-    db_name = f"{sanitized_name}.db"
+    entity_dir = os.path.join(OUTPUT_DIR, entity_type, sanitized_name)
+    os.makedirs(entity_dir, exist_ok=True)
+
+    db_name = os.path.join(entity_dir, f"{sanitized_name}.db")
     
     if not os.path.exists(db_name):
         print(f"No existing database found for {entity_name}. Creating new backup...")
@@ -810,7 +850,9 @@ async def update_entity(client, entity_id, entity_name, entity, download_media=F
                 if download_media:
                     if not await media_exists(cursor, entity_id, id, media_type):
                         try:
-                            media_file = await message.download_media(file=f"media/{entity_id}/")
+                            media_dir = os.path.join(entity_dir, "media")
+                            os.makedirs(media_dir, exist_ok=True)
+                            media_file = await message.download_media(file=media_dir)
                             if media_file:
                                 media_hash = get_file_hash(media_file)
                         except Exception as e:
@@ -1016,10 +1058,13 @@ def generate_html(db_name, chat_name, entity_id=None):
         get_reply_preview=get_reply_preview
     )
     
-    with open(f"{chat_name}.html", "w", encoding='utf-8') as f:
+    # Save HTML in the same directory as the database
+    db_dir = os.path.dirname(db_name)
+    html_path = os.path.join(db_dir, f"{chat_name}.html")
+    with open(html_path, "w", encoding='utf-8') as f:
         f.write(output)
-    
-    print(f"HTML file generated: {chat_name}.html")
+
+    print(f"HTML file generated: {html_path}")
 
 if __name__ == "__main__":
     asyncio.run(main())
