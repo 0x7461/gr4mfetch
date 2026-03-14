@@ -1,3 +1,0 @@
-telethon
-jinja2
-beautifulsoup4
