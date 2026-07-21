@@ -1,0 +1,130 @@
+"""Headless, importable entry points for gr4mfetch.
+
+Drives the existing telegram_backup functions (process_entity / update_entity)
+without the interactive main() menu, so archiver's `telegram` source backend
+can call them programmatically. Purely additive: this module does NOT modify
+the upstream monolith, so it never conflicts on an upstream rebase.
+
+Key differences from the interactive tool:
+  - resolves a channel by its immutable numeric id (no dialog-menu selection)
+  - reuses an existing session (no interactive phone/code login)
+  - never logs out and never deletes account service messages
+"""
+
+import os
+import asyncio
+
+from dotenv import load_dotenv
+
+# Load creds before importing the monolith — its module-level guard calls
+# exit(1) on missing API_ID/API_HASH. Explicit path makes this CWD-independent.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_HERE, ".env"))
+
+import telegram_backup as tb  # noqa: E402  (must follow load_dotenv)
+from telethon import TelegramClient  # noqa: E402
+from telethon.tl.types import PeerChannel  # noqa: E402
+
+
+def make_client(session=None, api_id=None, api_hash=None, *, receive_updates=False):
+    """Build a TelegramClient from an existing session — no interactive login.
+
+    session: Telethon session name/path. Defaults to env SESSION_NAME.
+    """
+    session = session or os.getenv("SESSION_NAME")
+    if not session:
+        raise ValueError("no session: pass session= or set SESSION_NAME in .env")
+    return TelegramClient(
+        session,
+        api_id or tb.api_id,
+        api_hash or tb.api_hash,
+        receive_updates=receive_updates,
+    )
+
+
+async def resolve_channel(client, channel_id):
+    """Resolve a channel by numeric id to a Telethon entity.
+
+    Tries the entity cache first (populated by prior backups), then falls back
+    to a dialog scan which repopulates access hashes.
+    """
+    channel_id = int(channel_id)
+    try:
+        return await client.get_entity(PeerChannel(channel_id))
+    except (ValueError, TypeError):
+        async for dialog in client.iter_dialogs():
+            if dialog.entity.id == channel_id:
+                return dialog.entity
+        raise LookupError(f"channel id {channel_id} not found in dialogs")
+
+
+async def backup_channel(client, channel_id, *, output_dir=None, update=True,
+                         download_media=True):
+    """Headless backup/update of one channel by id into output_dir.
+
+    Reuses telegram_backup.update_entity / process_entity unchanged. Never logs
+    out; never deletes service messages. `update=True` is incremental (only
+    messages newer than the DB watermark); `update=False` is a full pull.
+    """
+    if output_dir:
+        tb.OUTPUT_DIR = output_dir
+        os.makedirs(os.path.join(output_dir, "media"), exist_ok=True)
+    entity = await resolve_channel(client, channel_id)
+    name = getattr(entity, "title", str(channel_id))
+    if update:
+        await tb.update_entity(client, entity.id, name, entity,
+                               download_media=download_media)
+    else:
+        await tb.process_entity(client, entity.id, name, entity,
+                                download_media=download_media)
+
+
+async def _cli():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Headless gr4mfetch channel backup")
+    parser.add_argument("channel_id", type=int, nargs="?",
+                        help="immutable Telegram channel id (omit with --login)")
+    parser.add_argument("--login", action="store_true",
+                        help="interactive one-time login to (re)create the session, then exit")
+    parser.add_argument("--session", default=None,
+                        help="Telethon session name/path (default: env SESSION_NAME)")
+    parser.add_argument("--output-dir", default=None,
+                        help="output root (default: telegram_backup's OUTPUT_DIR)")
+    parser.add_argument("--full", action="store_true",
+                        help="full pull instead of incremental update")
+    parser.add_argument("--no-media", action="store_true", help="skip media download")
+    args = parser.parse_args()
+
+    # Run from the project dir so template.html + default output/ resolve.
+    os.chdir(_HERE)
+
+    client = make_client(session=args.session)
+
+    if args.login:
+        # Interactive: prompts for phone, then login code, then 2FA if enabled.
+        await client.start()
+        print("authorized:", await client.is_user_authorized())
+        await client.disconnect()
+        return
+
+    if args.channel_id is None:
+        parser.error("channel_id is required unless --login is given")
+
+    await client.connect()
+    try:
+        if not await client.is_user_authorized():
+            raise SystemExit(
+                "session not authorized — run `--login` once to refresh it")
+        await backup_channel(
+            client, args.channel_id,
+            output_dir=args.output_dir,
+            update=not args.full,
+            download_media=not args.no_media,
+        )
+    finally:
+        await client.disconnect()  # NEVER log_out — the session is shared with archiver
+
+
+if __name__ == "__main__":
+    asyncio.run(_cli())
