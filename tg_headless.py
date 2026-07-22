@@ -79,8 +79,33 @@ async def backup_channel(client, channel_id, *, output_dir=None, update=True,
                                 download_media=download_media)
 
 
+async def post_channel(client, channel_id, items, *, throttle=3.5):
+    """Post each item as a document into a channel, throttled.
+
+    items: list of {"file": abs-path, "caption": str}. Uses force_document=True so
+    original bytes are preserved (photo mode would recompress + strip EXIF). Returns
+    a per-item result list [{"file", "ok", "message_id"|"error"}] — the caller records
+    only genuinely-posted items in its ledger, so a mid-batch failure never desyncs.
+    """
+    entity = await resolve_channel(client, channel_id)
+    results = []
+    for i, item in enumerate(items):
+        path = item["file"]
+        try:
+            msg = await client.send_file(
+                entity, path, caption=item.get("caption") or "", force_document=True,
+            )
+            results.append({"file": path, "ok": True, "message_id": msg.id})
+        except Exception as e:  # one bad file never aborts the batch
+            results.append({"file": path, "ok": False, "error": f"{type(e).__name__}: {e}"})
+        if i + 1 < len(items):
+            await asyncio.sleep(throttle)
+    return results
+
+
 async def _cli():
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(description="Headless gr4mfetch channel backup")
     parser.add_argument("channel_id", type=int, nargs="?",
@@ -94,6 +119,9 @@ async def _cli():
     parser.add_argument("--full", action="store_true",
                         help="full pull instead of incremental update")
     parser.add_argument("--no-media", action="store_true", help="skip media download")
+    parser.add_argument("--post", metavar="MANIFEST", default=None,
+                        help="post mode: JSON manifest {channel_id, items:[{file,caption}]}; "
+                             "posts each file as a document, prints POST_RESULTS <json>")
     args = parser.parse_args()
 
     # Run from the project dir so template.html + default output/ resolve.
@@ -108,8 +136,23 @@ async def _cli():
         await client.disconnect()
         return
 
+    if args.post:
+        with open(args.post) as f:
+            manifest = json.load(f)
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise SystemExit(
+                    "session not authorized — run `--login` once to refresh it")
+            results = await post_channel(
+                client, manifest["channel_id"], manifest["items"])
+        finally:
+            await client.disconnect()  # NEVER log_out — session is shared with archiver
+        print("POST_RESULTS " + json.dumps(results))
+        return
+
     if args.channel_id is None:
-        parser.error("channel_id is required unless --login is given")
+        parser.error("channel_id is required unless --login or --post is given")
 
     await client.connect()
     try:
