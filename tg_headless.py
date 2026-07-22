@@ -13,6 +13,7 @@ Key differences from the interactive tool:
 
 import os
 import asyncio
+import random
 
 from dotenv import load_dotenv
 
@@ -79,13 +80,14 @@ async def backup_channel(client, channel_id, *, output_dir=None, update=True,
                                 download_media=download_media)
 
 
-async def post_channel(client, channel_id, items, *, throttle=3.5):
-    """Post each item as a document into a channel, throttled.
+async def post_channel(client, channel_id, items, *, gap_min=3.0, gap_max=6.0):
+    """Post each item as a document into a channel, with a jittered inter-post gap.
 
     items: list of {"file": abs-path, "caption": str}. Uses force_document=True so
-    original bytes are preserved (photo mode would recompress + strip EXIF). Returns
-    a per-item result list [{"file", "ok", "message_id"|"error"}] — the caller records
-    only genuinely-posted items in its ledger, so a mid-batch failure never desyncs.
+    original bytes are preserved (photo mode would recompress + strip EXIF). The gap
+    between posts is randomized in [gap_min, gap_max] so the feed has no fixed rhythm.
+    Returns a per-item result list [{"file", "ok", "message_id"|"error"}] — the caller
+    records only genuinely-posted items in its ledger, so a mid-batch failure never desyncs.
     """
     entity = await resolve_channel(client, channel_id)
     results = []
@@ -99,7 +101,7 @@ async def post_channel(client, channel_id, items, *, throttle=3.5):
         except Exception as e:  # one bad file never aborts the batch
             results.append({"file": path, "ok": False, "error": f"{type(e).__name__}: {e}"})
         if i + 1 < len(items):
-            await asyncio.sleep(throttle)
+            await asyncio.sleep(random.uniform(gap_min, gap_max))
     return results
 
 
@@ -145,7 +147,9 @@ async def _cli():
                 raise SystemExit(
                     "session not authorized — run `--login` once to refresh it")
             results = await post_channel(
-                client, manifest["channel_id"], manifest["items"])
+                client, manifest["channel_id"], manifest["items"],
+                gap_min=manifest.get("gap_min", 3.0),
+                gap_max=manifest.get("gap_max", 6.0))
         finally:
             await client.disconnect()  # NEVER log_out — session is shared with archiver
         print("POST_RESULTS " + json.dumps(results))
